@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Target, Zap, AlertCircle, Square, Battery } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import * as storage from '../lib/storage';
 
 const CATEGORY_COLORS = {
   work: '#6366f1',
@@ -15,34 +16,17 @@ function MonitoringPanel({ analytics, activeTask, timerSeconds, isTimerRunning, 
   const [energyLogs, setEnergyLogs] = useState([]);
 
   useEffect(() => {
-    fetchEnergyLogs();
+    const logs = storage.getEnergyLogs(currentDate);
+    setEnergyLogs(logs);
+    if (logs.length > 0) {
+      setEnergyLevel(logs[logs.length - 1].level);
+    }
   }, [currentDate]);
 
-  const fetchEnergyLogs = async () => {
-    try {
-      const res = await fetch(`/api/energy?date=${currentDate}`);
-      const data = await res.json();
-      setEnergyLogs(data);
-      if (data.length > 0) {
-        setEnergyLevel(data[data.length - 1].level);
-      }
-    } catch (err) {
-      console.error('Failed to fetch energy logs:', err);
-    }
-  };
-
-  const handleEnergyLog = async (level) => {
-    try {
-      await fetch('/api/energy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level })
-      });
-      setEnergyLevel(level);
-      fetchEnergyLogs();
-    } catch (err) {
-      console.error('Failed to log energy:', err);
-    }
+  const handleEnergyLog = (level) => {
+    storage.addEnergyLog(level, '');
+    setEnergyLevel(level);
+    setEnergyLogs(storage.getEnergyLogs(currentDate));
   };
 
   const categoryData = analytics?.categoryTime 
@@ -63,32 +47,22 @@ function MonitoringPanel({ analytics, activeTask, timerSeconds, isTimerRunning, 
   return (
     <div className="panel timer-panel">
       <div className="panel-header">
-        <h2 className="panel-title">
-          <Target size={18} />
-          Activity Monitor
-        </h2>
+        <h2 className="panel-title"><Target size={18} /> Activity Monitor</h2>
       </div>
 
       <div className="panel-content">
-        {/* Timer Section */}
         <div className="timer-display" style={{ color: isTimerRunning ? 'var(--accent)' : 'var(--text-primary)' }}>
           {formatTime(timerSeconds)}
         </div>
         
         {activeTask ? (
           <>
-            <div className="timer-task">
-              Currently: <strong>{activeTask.title}</strong>
-            </div>
+            <div className="timer-task">Currently: <strong>{activeTask.title}</strong></div>
             <div className="timer-controls">
               {isTimerRunning ? (
-                <button className="btn btn-danger" onClick={onStopTimer}>
-                  <Square size={16} /> Stop
-                </button>
+                <button className="btn btn-danger" onClick={onStopTimer}><Square size={16} /> Stop</button>
               ) : (
-                <button className="btn btn-success" onClick={() => {}}>
-                  Paused
-                </button>
+                <button className="btn btn-success">Paused</button>
               )}
               <button className="btn btn-secondary" onClick={onLogDistraction}>
                 <AlertCircle size={16} /> Log Distraction
@@ -99,7 +73,6 @@ function MonitoringPanel({ analytics, activeTask, timerSeconds, isTimerRunning, 
           <div className="timer-task">Select a task to start tracking</div>
         )}
 
-        {/* Stats */}
         <div className="stats-grid" style={{ marginTop: '1.5rem' }}>
           <div className="stat-card">
             <div className="stat-value">{analytics?.disciplineScore || 0}%</div>
@@ -119,7 +92,6 @@ function MonitoringPanel({ analytics, activeTask, timerSeconds, isTimerRunning, 
           </div>
         </div>
 
-        {/* Focus Distribution */}
         {categoryData.length > 0 && (
           <div style={{ marginBottom: '1.5rem' }}>
             <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -128,15 +100,7 @@ function MonitoringPanel({ analytics, activeTask, timerSeconds, isTimerRunning, 
             <div style={{ height: 150 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie
-                    data={categoryData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={40}
-                    outerRadius={60}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
+                  <Pie data={categoryData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={2} dataKey="value">
                     {categoryData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
@@ -156,18 +120,13 @@ function MonitoringPanel({ analytics, activeTask, timerSeconds, isTimerRunning, 
           </div>
         )}
 
-        {/* Energy Tracker */}
         <div>
           <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Battery size={16} /> Energy Level
           </h3>
           <div className="energy-scale">
             {[1, 2, 3, 4, 5].map(level => (
-              <button
-                key={level}
-                className={`energy-btn ${energyLevel === level ? 'active' : ''}`}
-                onClick={() => handleEnergyLog(level)}
-              >
+              <button key={level} className={`energy-btn ${energyLevel === level ? 'active' : ''}`} onClick={() => handleEnergyLog(level)}>
                 {level}
               </button>
             ))}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
-import { Sun, Moon, Flame, Plus, Play, Square, Coffee, Zap, Target, TrendingUp, Clock, AlertCircle } from 'lucide-react';
+import { Sun, Moon, Flame, TrendingUp } from 'lucide-react';
 import PlanningPanel from './components/PlanningPanel';
 import MonitoringPanel from './components/MonitoringPanel';
 import QuickActions from './components/QuickActions';
@@ -8,8 +8,7 @@ import TaskModal from './components/TaskModal';
 import ReflectionModal from './components/ReflectionModal';
 import DistractionModal from './components/DistractionModal';
 import AnalyticsModal from './components/AnalyticsModal';
-
-const API_BASE = '/api';
+import * as storage from './lib/storage';
 
 function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
@@ -22,7 +21,6 @@ function App() {
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   
-  // Modals
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [showReflectionModal, setShowReflectionModal] = useState(false);
@@ -34,143 +32,69 @@ function App() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  const fetchTasks = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/tasks?date=${currentDate}`);
-      const data = await res.json();
-      setTasks(data);
-    } catch (err) {
-      console.error('Failed to fetch tasks:', err);
-    }
-  }, [currentDate]);
-
-  const fetchStreak = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/streak`);
-      const data = await res.json();
-      setStreak(data);
-    } catch (err) {
-      console.error('Failed to fetch streak:', err);
-    }
-  };
-
-  const fetchAnalytics = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/analytics/daily?date=${currentDate}`);
-      const data = await res.json();
-      setAnalytics(data);
-    } catch (err) {
-      console.error('Failed to fetch analytics:', err);
-    }
+  const loadData = useCallback(() => {
+    setTasks(storage.getTasks(currentDate));
+    setStreak(storage.getStreak());
+    setAnalytics(storage.getDailyAnalytics(currentDate));
   }, [currentDate]);
 
   useEffect(() => {
-    fetchTasks();
-    fetchStreak();
-    fetchAnalytics();
-  }, [fetchTasks, fetchAnalytics]);
+    loadData();
+  }, [loadData]);
 
-  // Timer effect
   useEffect(() => {
     let interval;
     if (isTimerRunning) {
-      interval = setInterval(() => {
-        setTimerSeconds(s => s + 1);
-      }, 1000);
+      interval = setInterval(() => setTimerSeconds(s => s + 1), 1000);
     }
     return () => clearInterval(interval);
   }, [isTimerRunning]);
 
-  const handleAddTask = async (taskData) => {
-    try {
-      const res = await fetch(`${API_BASE}/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...taskData, date: currentDate })
-      });
-      const newTask = await res.json();
-      setTasks([...tasks, newTask]);
-      setShowTaskModal(false);
-      fetchAnalytics();
-    } catch (err) {
-      console.error('Failed to add task:', err);
-    }
+  const handleAddTask = (taskData) => {
+    const newTask = storage.addTask({ ...taskData, date: currentDate });
+    setTasks([...tasks, newTask]);
+    setShowTaskModal(false);
+    setAnalytics(storage.getDailyAnalytics(currentDate));
   };
 
-  const handleUpdateTask = async (id, updates) => {
-    try {
-      await fetch(`${API_BASE}/tasks/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      });
-      setTasks(tasks.map(t => t.id === id ? { ...t, ...updates } : t));
-      fetchAnalytics();
-    } catch (err) {
-      console.error('Failed to update task:', err);
-    }
+  const handleUpdateTask = (id, updates) => {
+    storage.updateTask(id, updates);
+    setTasks(tasks.map(t => t.id === id ? { ...t, ...updates } : t));
+    setAnalytics(storage.getDailyAnalytics(currentDate));
   };
 
-  const handleDeleteTask = async (id) => {
-    try {
-      await fetch(`${API_BASE}/tasks/${id}`, { method: 'DELETE' });
-      setTasks(tasks.filter(t => t.id !== id));
-      if (activeTask?.id === id) {
-        setActiveTask(null);
-        setIsTimerRunning(false);
-      }
-      fetchAnalytics();
-    } catch (err) {
-      console.error('Failed to delete task:', err);
-    }
-  };
-
-  const handleStartTimer = async (task) => {
-    if (activeTask && activeTask.id !== task.id) {
-      await handleStopTimer();
-    }
-    try {
-      await fetch(`${API_BASE}/timelogs/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: task.id })
-      });
-      setActiveTask(task);
-      setTimerSeconds(0);
-      setIsTimerRunning(true);
-    } catch (err) {
-      console.error('Failed to start timer:', err);
-    }
-  };
-
-  const handleStopTimer = async () => {
-    if (!activeTask) return;
-    try {
-      await fetch(`${API_BASE}/timelogs/stop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: activeTask.id })
-      });
+  const handleDeleteTask = (id) => {
+    storage.deleteTask(id);
+    setTasks(tasks.filter(t => t.id !== id));
+    if (activeTask?.id === id) {
+      setActiveTask(null);
       setIsTimerRunning(false);
-      fetchAnalytics();
-    } catch (err) {
-      console.error('Failed to stop timer:', err);
     }
+    setAnalytics(storage.getDailyAnalytics(currentDate));
   };
 
-  const handleLogDistraction = async (data) => {
-    if (!activeTask) return;
-    try {
-      await fetch(`${API_BASE}/distractions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: activeTask.id, ...data })
-      });
-      setShowDistractionModal(false);
-      fetchAnalytics();
-    } catch (err) {
-      console.error('Failed to log distraction:', err);
+  const handleStartTimer = (task) => {
+    if (activeTask && activeTask.id !== task.id) {
+      handleStopTimer();
     }
+    storage.startTimeLog(task.id);
+    setActiveTask(task);
+    setTimerSeconds(0);
+    setIsTimerRunning(true);
+  };
+
+  const handleStopTimer = () => {
+    if (!activeTask) return;
+    storage.stopTimeLog(activeTask.id);
+    setIsTimerRunning(false);
+    setAnalytics(storage.getDailyAnalytics(currentDate));
+  };
+
+  const handleLogDistraction = (data) => {
+    if (!activeTask) return;
+    storage.addDistraction(activeTask.id, data.description, data.duration);
+    setShowDistractionModal(false);
+    setAnalytics(storage.getDailyAnalytics(currentDate));
   };
 
   const formatTime = (seconds) => {
@@ -235,7 +159,7 @@ function App() {
 
       <QuickActions
         onStartDeepWork={() => setFocusMode(true)}
-        onLogBreak={() => handleStopTimer()}
+        onLogBreak={handleStopTimer}
         onAddTask={() => { setEditingTask(null); setShowTaskModal(true); }}
         onReflection={() => setShowReflectionModal(true)}
         focusMode={focusMode}
@@ -251,23 +175,15 @@ function App() {
       )}
 
       {showReflectionModal && (
-        <ReflectionModal
-          date={currentDate}
-          onClose={() => setShowReflectionModal(false)}
-        />
+        <ReflectionModal date={currentDate} onClose={() => setShowReflectionModal(false)} />
       )}
 
       {showDistractionModal && (
-        <DistractionModal
-          onSave={handleLogDistraction}
-          onClose={() => setShowDistractionModal(false)}
-        />
+        <DistractionModal onSave={handleLogDistraction} onClose={() => setShowDistractionModal(false)} />
       )}
 
       {showAnalyticsModal && (
-        <AnalyticsModal
-          onClose={() => setShowAnalyticsModal(false)}
-        />
+        <AnalyticsModal onClose={() => setShowAnalyticsModal(false)} />
       )}
     </div>
   );
